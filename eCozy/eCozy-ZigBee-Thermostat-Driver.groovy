@@ -1,5 +1,5 @@
 /**
- *  Copyright 2018 ckpt-martin
+ *  Copyright 2017 ckpt-martin
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -12,11 +12,11 @@
  *
  *  eCozy ZigBee Thermostat
  *
- *  Version: 1.2
+ *  Version: 1.3
  *
  *  Author: ckpt-martin
  *
- *  Date: 2018-04-06
+ *  Date: 2018-04-11
  */
  
 
@@ -31,9 +31,6 @@ metadata {
 		capability "Sensor"
 		capability "Configuration"
 
-		command "modeHeat"
-		command "modeOff"
-		command "modeAuto"
 		command "increaseHeatSetpoint"
 		command "decreaseHeatSetpoint"
 
@@ -41,7 +38,7 @@ metadata {
 	}
 
 	preferences {
-		input("unitformat", "enum", title: "What unit format do you want to display temperature in SmartThings? (NOTE: Thermostat displays Celsius regardless.)", options: ["Celsius", "Fahrenheit"], defaultValue: "Celsius", required: false, displayDuringSetup: false)
+		input("unitformat", "enum", title: "What unit format do you want to display temperature in Hubitat? (NOTE: Thermostat displays Celsius regardless.)", options: ["Celsius", "Fahrenheit"], defaultValue: "Celsius", required: false, displayDuringSetup: false)
 		input("lock", "enum", title: "Display Lock?", options: ["No", "Temperature", "Touchscreen"], defaultValue: "No", required: false, displayDuringSetup: false)
 		input("tempcal", "enum", title: "Temperature adjustment.", options: ["+2.5", "+2.0", "+1.5", "+1.0", "+0.5", "0", "-0.5", "-1.0", "-1.5", "-2.0", "-2.5"], defaultValue: "0", required: false, displayDuringSetup: false)
 	}
@@ -130,23 +127,23 @@ def parse(String description) {
 			else if (batteryVoltage == 25)
 			{
 				map.value = "20"
-	    }
+		    }
 			else if (batteryVoltage == 26)
 			{
 				map.value = "40"
-	    }
-			else if (batteryVoltage == 27)
+		    }
+				else if (batteryVoltage == 27)
 			{
 				map.value = "60"
-	    }
+		    }
 			else if (batteryVoltage == 28)
 			{
 				map.value = "80"
-	    }
+			}
 			else if (batteryVoltage >= 29)
-	    {
-				map.value = "100"
-	    }
+			{
+					map.value = "100"
+			}
 		}
 		else if (descMap.cluster == "0000" && descMap.attrId == "0001")
 		{
@@ -164,7 +161,7 @@ def parse(String description) {
 		{
 			log.debug "TEMP CALIBRATION: $descMap.value"
 		}
-		else if (descMap.cluster == "0201" && descMap.attrId == "0012")
+		else if (descMap.cluster == "0201" && descMap.attrId == "0012" && descMap.size == "0C")
 		{
 			log.debug "HEATING SETPOINT: $descMap.value"
 			map.name = "heatingSetpoint"
@@ -232,119 +229,107 @@ def parse(String description) {
 	}
 
 	def result = null
-		if (map) {
-			result = createEvent(map)
-		}
-		log.debug "Parse returned $map"
-		return result
+	if (map) {
+		result = createEvent(map)
 	}
+	log.debug "Parse returned $map"
+	return result
+}
 
-	def parseDescriptionAsMap(description) {
-		(description - "read attr - ").split(",").inject([:]) { map, param ->
-			def nameAndValue = param.split(":")
-			map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
-		}
+def parseDescriptionAsMap(description) {
+	(description - "read attr - ").split(",").inject([:]) { map, param ->
+		def nameAndValue = param.split(":")
+		map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
 	}
+}
 
-	def getBatteryVoltage(value) {
-		if (value != null) {
-			log.debug("value $value")
-			return Math.round(Integer.parseInt(value, 16))
-		}
+def getBatteryVoltage(value) {
+	if (value != null) {
+		log.debug("value $value")
+		return Math.round(Integer.parseInt(value, 16))
 	}
+}
 
-	def getTemperature(value) {
-		if (value != null) {
-			log.debug("value $value")
-			def celsius = Integer.parseInt(value, 16) / 100
-			if (settings.unitformat == "Fahrenheit") {
-				return Math.round(celsiusToFahrenheit(celsius))
-			} else {
-				return Math.round(celsius)
-			}
-		}
-	}
-
-	def quickSetHeat(degrees) {
-		setHeatingSetpoint(degrees)
-	}
-
-	def setHeatingSetpoint(degrees) {
-		if (degrees != null) {
-			def degreesInteger = Math.round(degrees)
-			int temp;
-			temp = (Math.round(degrees * 2)) / 2
-
-			log.debug "setHeatingSetpoint({$temp} ${temperatureScale})"
-			def celsius = (settings.unitformat == "Fahrenheit") ? (fahrenheitToCelsius(temp)).round : temp
-			def cmds =
-				zigbee.writeAttribute(0x201, 0x12, 0x29, hex(celsius * 100)) +
-				zigbee.readAttribute(0x201, 0x12) +	//Read Heat Setpoint
-				zigbee.readAttribute(0x201, 0x08)	//Read PI Heat demand
-			fireCommand(cmds)
+def getTemperature(value) {
+	if (value != null) {
+		log.debug("value $value")
+		def celsius = Integer.parseInt(value, 16) / 100
+		if (settings.unitformat == "Fahrenheit") {
+			return Math.round(celsiusToFahrenheit(celsius))
+		} else {
+			return Math.round(celsius)
 		}
 	}
+}
 
-	def increaseHeatSetpoint()
+def setHeatingSetpoint(degrees) {
+	if (degrees != null) {
+		int temp;
+		temp = (Math.round(degrees * 2)) / 2
+		log.info "setHeatingSetpoint({$temp} ${temperatureScale})"
+		def celsius = (settings.unitformat == "Fahrenheit") ? (fahrenheitToCelsius(temp)).round : temp
+		sendEvent("name":"heatingSetpoint", "value":celsius)
+		def zigbeeTemp = celsius * 100;
+		def cmds =
+			zigbee.writeAttribute(0x201, 0x12, 0x29, zigbeeTemp) +
+			zigbee.readAttribute(0x201, 0x12) +	//Read Heat Setpoint
+			zigbee.readAttribute(0x201, 0x08)	//Read PI Heat demand
+		return cmds
+	}
+}
+
+def increaseHeatSetpoint()
+{
+	float currentSetpoint = device.currentValue("heatingSetpoint")
+   	float maxSetpoint
+   	float step
+
+   	if (settings.unitformat == "Fahrenheit")
+   	{
+		maxSetpoint = 86
+		step = 1
+   	}
+   	else
+   	{
+		maxSetpoint = 30
+		step = 1
+   	}
+
+	if (currentSetpoint < maxSetpoint)
 	{
-    def currentMode = device.currentState("thermostatMode")?.value
-    if (currentMode != "off")
-    {
-			float currentSetpoint = device.currentValue("heatingSetpoint")
-    	float maxSetpoint
-    	float step
-
-    	if (settings.unitformat == "Fahrenheit")
-    	{
-				maxSetpoint = 86
-				step = 1
-    	}
-    	else
-    	{
-				maxSetpoint = 30
-				step = 1
-    	}
-
-			if (currentSetpoint < maxSetpoint)
-			{
-				currentSetpoint = currentSetpoint + step
-				quickSetHeat(currentSetpoint)
-			}
-    }
+		currentSetpoint = currentSetpoint + step
+		setHeatingSetpoint(currentSetpoint)
 	}
+}
 
-	def decreaseHeatSetpoint()
+def decreaseHeatSetpoint()
+{
+	float currentSetpoint = device.currentValue("heatingSetpoint")
+	float minSetpoint
+	float step
+
+	if (settings.unitformat == "Fahrenheit")
 	{
-    def currentMode = device.currentState("thermostatMode")?.value
-    if (currentMode != "off")
-    {
-			float currentSetpoint = device.currentValue("heatingSetpoint")
-			float minSetpoint
-			float step
-
-			if (settings.unitformat == "Fahrenheit")
-			{
-				minSetpoint = 41
-				step = 1
-			}
-			else
-			{
-				minSetpoint = 5
-				step = 1
-			}
-
-    	if (currentSetpoint > minSetpoint)
-    	{
-				currentSetpoint = currentSetpoint - step
-				quickSetHeat(currentSetpoint)
-    	}
-    }
+		minSetpoint = 41
+		step = 1
+	}
+	else
+	{
+		minSetpoint = 5
+		step = 1
 	}
 
-	def modeHeat() {
-		log.debug "modeHeat"
-		sendEvent("name":"thermostatMode", "value":"heat")
-		zigbee.writeAttribute(0x201, 0x001C, 0x30, 0x04)
+   	if (currentSetpoint > minSetpoint)
+   	{
+		currentSetpoint = currentSetpoint - step
+		setHeatingSetpoint(currentSetpoint)
+   	}
+}
+
+def modeHeat() {
+	log.debug "modeHeat"
+	sendEvent("name":"thermostatMode", "value":"heat")
+	zigbee.writeAttribute(0x201, 0x001C, 0x30, 0x04)
 }
 
 def modeOff() {
@@ -365,7 +350,7 @@ def configure() {
 		zigbee.configureReporting(0x0201, 0x0008, 0x20, 300, 7200, 0x05) +   //Attribute ID 0x0008 = pi heating demand, Data Type: U8BIT
 		zigbee.configureReporting(0x0201, 0x0000, 0x29, 30, 0, 0x0064) + 	//Attribute ID 0x0000 = local temperature, Data Type: S16BIT
 		zigbee.configureReporting(0x0201, 0x0012, 0x29, 30, 0, 0x0064) +  	//Attribute ID 0x0012 = occupied heat setpoint, Data Type: S16BIT
-		zigbee.configureReporting(0x0201, 0x001C, 0x30, 1, 0, 1)   	//Attribute ID 0x001C = system mode, Data Type: 8 bits enum
+		zigbee.configureReporting(0x0201, 0x001C, 0x30, 1, 0, 1) +   	//Attribute ID 0x001C = system mode, Data Type: 8 bits enum
         
 		//Cluster ID (0x0001 = Power)
 		zigbee.configureReporting(0x0001, 0x0020, 0x20, 600, 21600, 0x01) 	//Attribute ID 0x0020 = battery voltage, Data Type: U8BIT
@@ -567,7 +552,8 @@ def updated() {
 		zigbee.readAttribute(0x201, 0x0010)
 
 	log.info "updated() --- cmds: $cmds"
-	fireCommand(cmds)
+//	fireCommand(cmds)
+    return cmds
 }
 
 private fireCommand(List commands) {
